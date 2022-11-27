@@ -38,9 +38,9 @@ public:
 		track_id_ = 0;	
 		filewrite.open("/home/wx/Desktop/tracking_code/tracker/trackresult.txt", std::ios::out|std::ios::app);
 
-		chi2in975[1] = 5.025;
-		chi2in975[2] = 7.378;
-		chi2in975[3] = 9.348;
+		chi2in975[1] = 5.025; // 自由度为1
+		chi2in975[2] = 7.378; // 自由度为2
+		chi2in975[3] = 9.348; // 自由度为3
 		chi2in975[4] = 11.143;
 		chi2in975[5] = 12.833;
 		chi2in975[6] = 14.449;

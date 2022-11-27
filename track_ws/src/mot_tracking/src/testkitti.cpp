@@ -44,6 +44,9 @@
 #include <pcl/point_types.h>
 #include <pcl/io/pcd_io.h>
 
+#include "opencv2/imgproc/imgproc_c.h"
+
+
 
 using namespace std;
 typedef boost::tokenizer<boost::char_separator<char> > tokenizer;
@@ -358,9 +361,10 @@ int main(int argc, char** argv){
 	int maxframe = 0;
 
 	// read the label file
-	std::string labelpath = path + "/lable_02/"+file+".txt";
-	cout<<labelpath<<endl;
+	std::string labelpath = path + "/label_02/"+file+".txt";
+	cout<<"labelpath:    "<<labelpath<<endl;
 	std::ifstream label(labelpath);
+
 	std::vector<std::string> labeldata;
 	if (label) {
 		boost::char_separator<char> sep_line { "\n" };
@@ -453,7 +457,7 @@ int main(int argc, char** argv){
 
 	int frame = 0;
 
-	cout<<"maxfrmae "<<maxframe<<endl;
+	cout<<"maxfrmaes "<<maxframe<<endl;
 
 
 	cv::RNG rng(12345);
@@ -467,9 +471,9 @@ int main(int argc, char** argv){
         	std::abort();
     	}*/
 
-
 	while(ros::ok() && frame < maxframe){
 
+        cout<<"frame "<<frame<<endl;
 
 		int max_marker_size_ = 50;
 		visualization_msgs::MarkerArray marker_array;
@@ -590,8 +594,10 @@ int main(int argc, char** argv){
 	        		cv::line(images, vertices[j], vertices[(j+1)%4], cv::Scalar(0,0,255), 1);
 		}
 
+
 		std::vector<Eigen::VectorXd> result;
 		int64_t tm0 = gtm();
+
 		tracker.track(Inputdets[frame],time, result);
    		int64_t tm1 = gtm();
   		printf("[INFO]update cast time:%ld us\n",  tm1-tm0);

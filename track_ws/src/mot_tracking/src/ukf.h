@@ -8,6 +8,7 @@
 #include <iostream>
 #include <stdlib.h>
 #include <string>
+#include <vector>
 #include <Eigen/Geometry>
 #include "Eigen/Dense"
 #include <unordered_map>
