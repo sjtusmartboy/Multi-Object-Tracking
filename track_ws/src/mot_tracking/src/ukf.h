@@ -88,6 +88,7 @@ private:
 
 	Eigen::VectorXd x_; //state vector
 	Eigen::MatrixXd P_; //状态协方差
+	Eigen::MatrixXd sr_P_; //状态协方差
 
 
 	Eigen::MatrixXd Q_; //state白噪声
@@ -102,6 +103,7 @@ private:
 	Eigen::MatrixXd Z_sigma_;
 
 	Eigen::MatrixXd S_;
+	Eigen::MatrixXd sr_S_;
  	Eigen::VectorXd Zminus_;
 	Eigen::VectorXd z_pre_;
 };

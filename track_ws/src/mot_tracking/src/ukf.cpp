@@ -45,6 +45,19 @@ float normalangle(float angle)
   return angle;
 }
 
+Eigen::VectorXd normalangle(Eigen::VectorXd X) {
+    Eigen::VectorXd times = round(X.cwiseAbs().array() / (2. * M_PI)); // for the case when angle is very very large
+
+    Eigen::VectorXd angle1 = X - times * 2.0 * M_PI;
+    Eigen::VectorXd angle2 = X + times * 2.0 * M_PI;
+
+    X = (X.array() > M_PI).select(angle1, X);
+    X = (X.array() < -M_PI).select(angle2, X);
+
+    return X;
+}
+
+
 
 //state: position_x, position_y,velocity, yaw, yaw_rate
 void UKF::Initialization(Eigen::VectorXd& X, Eigen::MatrixXd& P, float time){
@@ -52,6 +65,8 @@ void UKF::Initialization(Eigen::VectorXd& X, Eigen::MatrixXd& P, float time){
 	//std::cout<<"######################## UKFinitialize #######################"<<std::endl;
 	x_ = X;
 	P_ = P;
+//            std::cout<<"P_     "<<std::endl<<P_<<std::endl;
+    sr_P_ = P_.llt().matrixU();
 
 	pretime = time;
 
@@ -85,7 +100,7 @@ void UKF::MakeSigmaPoints(){
 	Eigen::MatrixXd P_aug = Eigen::MatrixXd::Zero(n_x_, n_x_);;
 	P_aug = P_;
 
-	Eigen::MatrixXd L = P_aug.llt().matrixL();
+//	Eigen::MatrixXd L = P_aug.llt().matrixL();
   	sigma_points = Eigen::MatrixXd(n_x_, 2 * n_x_ + 1);
 	//std::cout<<"MakeSigmaPoints\n"<<L<<std::endl;
 
@@ -94,8 +109,10 @@ void UKF::MakeSigmaPoints(){
 
 
 	for(int i=0; i<n_x_; ++i){
-		sigma_points.col(i+1) = x_aug_ + c*L.col(i);
-		sigma_points.col(i+n_x_+1) = x_aug_ - c*L.col(i);
+//		sigma_points.col(i+1) = x_aug_ + c*L.col(i);
+//		sigma_points.col(i+n_x_+1) = x_aug_ - c*L.col(i);
+        sigma_points.col(i+1) = x_aug_ + c*sr_P_.col(i);
+        sigma_points.col(i+n_x_+1) = x_aug_ - c*sr_P_.col(i);
 	}
 
 	//std::cout<<"MakeSigmaPointsresult: "<<'\n'<<sigma_points<<std::endl;
@@ -202,21 +219,59 @@ void UKF::Prediction(float ntime){
 
 	//std::cout<<"########## 计算预测均值x_ ##########"<<'\n'<<x_<<std::endl;
 	//计算预测协方差
-	try{
-		P_.fill(0.0);
-		for(int i=0; i<2*n_x_+1; ++i){
-			Eigen::VectorXd x_diff = sigma_points_pre.col(i)-x_;
-			x_diff(3) =  normalangle(x_diff(3));//,x_diff(2));
-			P_ += pre_weight(i) * x_diff * x_diff.transpose();
-		}
-      		
-		P_ += Q_;
-		//std::cout<<"计算预测协方差P_ "<<'\n'<<P_<<std::endl;
-	}
-	catch(std::bad_alloc){
-		std::cout<<"erro"<<std::endl;
-		return;
-	}
+
+//	try{
+//		P_.fill(0.0);
+//		for(int i=0; i<2*n_x_+1; ++i){
+//			Eigen::VectorXd x_diff = sigma_points_pre.col(i)-x_;
+//			x_diff(3) =  normalangle(x_diff(3));//,x_diff(2));
+//			P_ += pre_weight(i) * x_diff * x_diff.transpose();
+//		}
+//
+//		P_ += Q_;
+//		//std::cout<<"计算预测协方差P_ "<<'\n'<<P_<<std::endl;
+//	}
+//	catch(std::bad_alloc){
+//		std::cout<<"erro"<<std::endl;
+//		return;
+//	}
+    try{
+        P_.fill(0.0);
+        Eigen::MatrixXd x_diff = sigma_points_pre.colwise() - x_;
+        x_diff.row(3) = normalangle(x_diff.row(3) );//,x_diff(2));
+
+        Eigen::MatrixXd std_Q = Q_.llt().matrixL();
+//        std::cout<<"Q_     "<<std::endl<<Q_<<std::endl;
+//        std::cout<<"std_Q     "<<std::endl<<std_Q<<std::endl;
+
+        Eigen::MatrixXd C(n_x_, 3*n_x_);
+        C.leftCols(2*n_x_) = std::sqrt(pre_weight(1)) * x_diff.block(0,1,n_x_, 2*n_x_);
+        C.rightCols(n_x_) = std_Q;
+
+        Eigen::HouseholderQR<Eigen::MatrixXd> qr;
+        qr.compute(C.transpose());
+        Eigen::MatrixXd R1 = qr.matrixQR().triangularView<Eigen::Upper>();
+        Eigen::MatrixXd R = R1.block(0,0,n_x_,n_x_);
+//        Eigen::MatrixXd R = qr.matrixQR().triangularView<Eigen::Upper>().block(0,0,n_x_,n_x_);
+
+//        std::cout<<"R     "<< std::endl << R <<std::endl;
+
+        Eigen::internal::llt_inplace<double, Eigen::Upper>::rankUpdate(
+                R, sigma_points_pre.col(0) - x_, pre_weight(0));
+
+        sr_P_ = R;
+        P_ =  sr_P_.transpose() * sr_P_;
+
+//        std::cout<<"sr_P_     "<<std::endl<<sr_P_<<std::endl;
+
+        //std::cout<<"计算预测协方差P_ "<<'\n'<<P_<<std::endl;
+    }
+    catch(std::bad_alloc){
+        std::cout<<"erro"<<std::endl;
+        return;
+    }
+
+
 }
 
 
@@ -254,12 +309,31 @@ void UKF::PredictionZ(Eigen::VectorXd& X,Eigen::MatrixXd& P, float ntime){
 
 	//计算量测协方差
 	S_.fill(0.0);
-	for(int i=0; i < 2*n_x_ + 1; ++i){
-		Eigen::VectorXd z_diff = Z_sigma_.col(i) - z_pre_;
-		S_ += (mea_weight(i) * z_diff * z_diff.transpose());
-	}
+    Eigen::MatrixXd z_diff = Z_sigma_.colwise() - z_pre_;
+    Eigen::MatrixXd std_R = R_.llt().matrixL();
 
-	S_ += R_;
+    Eigen::MatrixXd C(n_z_, 2*n_x_+n_z_);
+    C.leftCols(2*n_x_) = std::sqrt(mea_weight(1)) * z_diff.block(0,1,n_z_, 2*n_x_);
+    C.rightCols(n_z_) = std_R;
+
+    Eigen::HouseholderQR<Eigen::MatrixXd> qr;
+    qr.compute(C.transpose());
+    Eigen::MatrixXd R1 = qr.matrixQR().triangularView<Eigen::Upper>();
+    Eigen::MatrixXd R =  R1.block(0,0,n_z_,n_z_);
+
+    Eigen::internal::llt_inplace<double, Eigen::Upper>::rankUpdate(
+            R, Z_sigma_.col(0) - z_pre_, mea_weight(0));
+
+    sr_S_ = R;
+    S_ =  sr_S_.transpose() * sr_S_;
+//    std::cout<<"rrrrrrrrrrrrr"<<std::endl;
+
+//	for(int i=0; i < 2*n_x_ + 1; ++i){
+//		Eigen::VectorXd z_diff = Z_sigma_.col(i) - z_pre_;
+//		S_ += (mea_weight(i) * z_diff * z_diff.transpose());
+//	}
+//
+//	S_ += R_;
 	//std::cout<<"########### UKF计算量测协方差S ###########\n"<<S_<<"\n ########### INVERSE ###########\n"<<S_.inverse()<<"\n########### R ###########\n"<<R_<< std::endl;
 
 	//std::cout<<"############################## UKFPrediction END ###################################"<<std::endl;
@@ -267,79 +341,66 @@ void UKF::PredictionZ(Eigen::VectorXd& X,Eigen::MatrixXd& P, float ntime){
 
 
 void UKF::Update( std::vector<Eigen::VectorXd>& Z, const Eigen::VectorXd& beta, const float& last_beta){
-	//std::cout<<"############################## UKFUPdate START #######################################"<<std::endl;
-	//std::cout<<"Update"<<std::endl;
-	//最后更新	
-	Eigen::MatrixXd T = Eigen::MatrixXd(n_x_,n_z_);
-	T.fill(0.0);
-	for(int i=0; i<2*n_x_+1; ++i){
-		Eigen::VectorXd x_diff = sigma_points_pre.col(i)-x_;
-		//x_diff(3) =  normalangle(x_diff(3));//,x_diff(2));
-		Eigen::VectorXd z_diff = Z_sigma_.col(i)-z_pre_;
-		T += mea_weight(i) * x_diff * z_diff.transpose();
-	}
-	//std::cout<<"最后更新T\n"<<T<<std::endl;
+    //std::cout<<"############################## UKFUPdate START #######################################"<<std::endl;
+    //std::cout<<"Update"<<std::endl;
+    //最后更新
 
-	//卡曼增益
-	Eigen::MatrixXd K = Eigen::MatrixXd(n_x_,n_z_);
-	K = T * S_.inverse();
-	//std::cout<<"卡曼增益K\n"<<K<<std::endl;
+    Eigen::MatrixXd T = Eigen::MatrixXd(n_x_,n_z_);
+    T.fill(0.0);
+    for(int i=0; i<2*n_x_+1; ++i){
+        Eigen::VectorXd x_diff = sigma_points_pre.col(i)-x_;
+        //x_diff(3) =  normalangle(x_diff(3));//,x_diff(2));
+        Eigen::VectorXd z_diff = Z_sigma_.col(i)-z_pre_;
+        T += mea_weight(i) * x_diff * z_diff.transpose();
+    }
+    //std::cout<<"最后更新T\n"<<T<<std::endl;
 
-	//JPDAF update
-	Zminus_.fill(0.0);
-	int i=0;
-	Eigen::VectorXd x_filter = Eigen::VectorXd(n_x_);
-	x_filter.fill(0.0);
-	for(const auto& det : Z)
-	{
-		Eigen::VectorXd a = x_ + K * (det - z_pre_);
-	    x_filter = x_filter + beta(i) * a;
-	    ++i;
-	}
-	x_filter = last_beta * x_ + x_filter;
+    //卡曼增益
+    Eigen::MatrixXd K = Eigen::MatrixXd(n_x_,n_z_);
+//	K = T * S_.inverse();
+//    K = T * sr_S_.transpose().inverse() * sr_S_.inverse();
+    K = T  * sr_S_.inverse() * sr_S_.transpose().inverse();
+    //std::cout<<"卡曼增益K\n"<<K<<std::endl;
 
-	Eigen::MatrixXd P_temp = Eigen::MatrixXd(n_x_, n_x_);
-	P_temp.fill(0.);
-	for(int i = 0; i < Z.size() + 1; ++i)
-	{
-		Eigen::VectorXd a = Eigen::VectorXd(n_x_);
-		a.setZero();
-	    if(i == Z.size()){
-	    	a = x_;
-	    }
-	    else{
-	    	a = x_ + K * (Z.at(i) - z_pre_);
-	    }
-
-	    P_temp = P_temp + beta(i) * (a * a.transpose() - x_filter * x_filter.transpose());
-	}
-
-	x_ = x_filter;
-	P_ -= (1 - last_beta) * K * S_ * K.transpose();
-	P_ += P_temp;
+    //JPDAF update
+    Zminus_.fill(0.0);
+    int i=0;
+    Eigen::VectorXd x_filter = Eigen::VectorXd(n_x_);
+    x_filter.fill(0.0);
+    for(const auto& det : Z)
+    {
+        Eigen::VectorXd a = x_ + K * (det - z_pre_);
+        x_filter = x_filter + beta(i) * a;
+        ++i;
+    }
+    x_filter = last_beta * x_ + x_filter;
 
 
-	/*for(const auto& det:Z){
-		Zminus_ += beta(i)*(det-z_pre_);
-		i++;
-	}
+    Eigen::MatrixXd  U = K * sr_S_;
+    for(int i = 0; i < n_z_; ++i){
+        Eigen::internal::llt_inplace<double, Eigen::Upper>::rankUpdate(
+                sr_P_, U.col(i), -1 *  (1 - last_beta));
+    }
 
-	x_ += K * Zminus_;
-	x_(3) = normalangle(x_(3));//,x_(2));
-	P_ -= (1-last_beta)* K * S_ * K.transpose();
+    for(int i = 0; i < Z.size() + 1; ++i)
+    {
+        Eigen::VectorXd a = Eigen::VectorXd(n_x_);
+        a.setZero();
+        if(i == Z.size()){
+            a = x_;
+        }
+        else{
+            a = x_ + K * (Z.at(i) - z_pre_);
+        }
 
-	Eigen::MatrixXd z_temp(n_z_,n_z_);
-	z_temp.fill(0.0);
-	
-	int j =0;
-	for(const auto& det:Z){
-		z_temp += beta(j)*(det-z_pre_)*(det-z_pre_).transpose();
-		j++;
-	}
+        Eigen::internal::llt_inplace<double, Eigen::Upper>::rankUpdate(
+                sr_P_, a, beta(i));
+        Eigen::internal::llt_inplace<double, Eigen::Upper>::rankUpdate(
+                sr_P_, x_filter, -1 * beta(i));
+    }
 
-	
-	P_ += K*(z_temp - Zminus_*Zminus_.transpose()) * K.transpose();	*/
-
+    x_ = x_filter;
+    P_ = sr_P_.transpose() * sr_P_;
 
 	//std::cout<<"\n ########### end ###########\n"<<x_<<'\n'<<std::endl;
 	//std::cout<<"############################## UKFUPdate END #################################"<<std::endl;
